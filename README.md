@@ -1,6 +1,3 @@
-🌈 Красочный README.md с emoji
-markdown
-Copy
 # 🚀 Parallel SSH Commander
 
 <div align="center">
