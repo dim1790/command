@@ -9,6 +9,9 @@ from queue import Queue
 from datetime import datetime
 import os
 import sys
+from PIL import Image, ImageDraw, ImageFont, ImageTk
+
+
 
 # Решение проблем с pandas при сборке
 if getattr(sys, 'frozen', False):
@@ -34,8 +37,34 @@ class SSHClientApp:
         # Создание интерфейса
         self.create_widgets()
 
+        # Создание водяного знака
+        self.create_watermark()
+
         # Проверка очереди вывода
         self.check_queue()
+
+    def create_watermark(self):
+        """Создание и размещение водяного знака"""
+        # Создаем изображение водяного знака
+        watermark = Image.new('RGBA', (350, 200), (240, 240, 240, 0))
+        draw = ImageDraw.Draw(watermark)
+
+        try:
+            font = ImageFont.truetype("arial.ttf", 30)
+        except:
+            font = ImageFont.load_default()
+
+        # Добавляем текст водяного знака (полупрозрачный серый)
+        draw.text((20, 10), "COMMANDER \nNesterov", fill=(150, 150, 150, 100), font=font)
+
+        # Конвертируем в формат Tkinter
+        self.watermark_image = ImageTk.PhotoImage(watermark)
+
+        # Создаем Label для водяного знака
+        self.watermark_label = tk.Label(self.root, image=self.watermark_image, bd=0)
+        self.watermark_label.place(relx=0.01, rely=0.70, anchor='sw')  # Размещаем в левом нижнем углу
+
+    # ... (остальные методы остаются без изменений) ...
 
     def create_widgets(self):
         # Основной контейнер
