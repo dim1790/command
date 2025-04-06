@@ -7,15 +7,11 @@ from tkinter import ttk, filedialog, messagebox, scrolledtext
 from threading import Thread
 from queue import Queue
 from datetime import datetime
-import os
-import sys
 from PIL import Image, ImageDraw, ImageFont, ImageTk
-
-
+import sys
 
 # Решение проблем с pandas при сборке
 if getattr(sys, 'frozen', False):
-    # Если программа запущена как собранный EXE
     os.environ['PATH'] = sys._MEIPASS + ";" + os.environ['PATH']
 
 
@@ -23,111 +19,113 @@ class SSHClientApp:
     def __init__(self, root):
         self.root = root
         self.root.title("Advanced SSH Device Commander")
-        self.root.geometry("1100x750")
+        self.root.geometry("1200x800")  # Увеличили окно для нового блока
 
         # Переменные для хранения данных
-        self.ip_list = []  # Список IP-адресов из первого столбца
-        self.credentials = []  # Список всех уникальных пар логин/пароль
+        self.ip_list = []
+        self.credentials = []
         self.commands = []
         self.results = {}
         self.output_queue = Queue()
         self.active_tabs = {}
-        self.delay = 3  # Задержка между командами в секундах
+        self.delay = 3
 
         # Создание интерфейса
         self.create_widgets()
-
-        # Создание водяного знака
         self.create_watermark()
-
-        # Проверка очереди вывода
         self.check_queue()
 
     def create_watermark(self):
         """Создание и размещение водяного знака"""
-        # Создаем изображение водяного знака
-        watermark = Image.new('RGBA', (350, 200), (240, 240, 240, 0))
+        watermark = Image.new('RGBA', (250, 100), (255, 255, 255, 0))
         draw = ImageDraw.Draw(watermark)
-
         try:
-            font = ImageFont.truetype("arial.ttf", 30)
+            font = ImageFont.truetype("arial.ttf", 24)
         except:
             font = ImageFont.load_default()
-
-        # Добавляем текст водяного знака (полупрозрачный серый)
-        draw.text((20, 10), "COMMANDER \nNesterov", fill=(150, 150, 150, 100), font=font)
-
-        # Конвертируем в формат Tkinter
+        draw.text((10, 10), "COMMANDER\nby FGMP1790", fill=(150, 150, 150, 100), font=font)
         self.watermark_image = ImageTk.PhotoImage(watermark)
-
-        # Создаем Label для водяного знака
         self.watermark_label = tk.Label(self.root, image=self.watermark_image, bd=0)
-        self.watermark_label.place(relx=0.01, rely=0.70, anchor='sw')  # Размещаем в левом нижнем углу
-
-    # ... (остальные методы остаются без изменений) ...
+        self.watermark_label.place(relx=0.01, rely=0.98, anchor='sw')
 
     def create_widgets(self):
         # Основной контейнер
         main_frame = tk.Frame(self.root)
-        main_frame.pack(fill=tk.BOTH, expand=True, padx=5, pady=5)
+        main_frame.pack(fill=tk.BOTH, expand=True, padx=10, pady=10)
 
-        # Панель управления слева
-        control_frame = tk.Frame(main_frame, width=350, relief=tk.RIDGE, borderwidth=2)
-        control_frame.pack(side=tk.LEFT, fill=tk.Y, padx=(0, 5))
-        control_frame.pack_propagate(False)
+        # Левая панель (управление + описание)
+        left_panel = tk.Frame(main_frame, width=400)
+        left_panel.pack(side=tk.LEFT, fill=tk.Y)
+        left_panel.pack_propagate(False)
+
+        # Блок с описанием формата Excel
+        desc_frame = tk.LabelFrame(left_panel, text="Формат Excel-файла", padx=5, pady=5)
+        desc_frame.pack(fill=tk.X, padx=5, pady=5)
+
+        desc_text = """Excel-файл должен содержать:
+1. Первый столбец - IP-адреса устройств
+2. Второй столбец - логины для подключения
+3. Третий столбец - пароли
+
+Пример:
+192.168.1.1  admin  password1
+192.168.1.2  user   password2
+192.168.1.1  root   toor
+
+Программа будет пробовать все комбинации логин/пароль для каждого IP-адреса."""
+
+        desc_label = tk.Label(desc_frame, text=desc_text, justify=tk.LEFT, anchor='w')
+        desc_label.pack(fill=tk.X, padx=5, pady=5)
 
         # Фрейм для загрузки файла
-        file_frame = tk.LabelFrame(control_frame, text="Device List (Excel: IPs in 1st col, creds in 2nd/3rd)", padx=5,
-                                   pady=5)
+        file_frame = tk.LabelFrame(left_panel, text="Загрузить Excel-файл", padx=5, pady=5)
         file_frame.pack(fill=tk.X, padx=5, pady=5)
 
         self.file_path = tk.StringVar()
         tk.Entry(file_frame, textvariable=self.file_path, state='readonly').pack(side=tk.LEFT, fill=tk.X, expand=True,
                                                                                  padx=5)
-        tk.Button(file_frame, text="Browse", command=self.browse_file).pack(side=tk.RIGHT, padx=5)
+        tk.Button(file_frame, text="Обзор", command=self.browse_file).pack(side=tk.RIGHT, padx=5)
 
         # Фрейм для ввода команд
-        cmd_frame = tk.LabelFrame(control_frame, text="Commands to Execute (one after another)", padx=5, pady=5)
+        cmd_frame = tk.LabelFrame(left_panel, text="Команды для выполнения", padx=5, pady=5)
         cmd_frame.pack(fill=tk.X, padx=5, pady=5)
 
         self.command_entries = []
         for i in range(5):
-            lbl = tk.Label(cmd_frame, text=f"Command {i + 1}:")
-            lbl.grid(row=i, column=0, sticky=tk.W)
-
-            entry = tk.Entry(cmd_frame)
-            entry.grid(row=i, column=1, sticky=tk.EW, padx=5, pady=2)
+            row_frame = tk.Frame(cmd_frame)
+            row_frame.pack(fill=tk.X, pady=2)
+            tk.Label(row_frame, text=f"Команда {i + 1}:", width=10).pack(side=tk.LEFT)
+            entry = tk.Entry(row_frame)
+            entry.pack(side=tk.LEFT, fill=tk.X, expand=True)
             self.command_entries.append(entry)
 
         # Кнопки управления
-        btn_frame = tk.Frame(control_frame)
-        btn_frame.pack(fill=tk.X, padx=5, pady=5)
+        btn_frame = tk.Frame(left_panel)
+        btn_frame.pack(fill=tk.X, padx=5, pady=10)
 
-        tk.Button(btn_frame, text="Execute", command=self.start_execution).pack(side=tk.LEFT, padx=5, fill=tk.X,
-                                                                                expand=True)
-        tk.Button(btn_frame, text="Save Results", command=self.save_results).pack(side=tk.LEFT, padx=5, fill=tk.X,
-                                                                                  expand=True)
-        tk.Button(btn_frame, text="Clear All", command=self.clear_all).pack(side=tk.LEFT, padx=5, fill=tk.X,
-                                                                            expand=True)
+        tk.Button(btn_frame, text="Выполнить", command=self.start_execution).pack(side=tk.LEFT, fill=tk.X, expand=True,
+                                                                                  padx=2)
+        tk.Button(btn_frame, text="Сохранить", command=self.save_results).pack(side=tk.LEFT, fill=tk.X, expand=True,
+                                                                               padx=2)
+        tk.Button(btn_frame, text="Очистить", command=self.clear_all).pack(side=tk.LEFT, fill=tk.X, expand=True, padx=2)
 
-        # Область вывода справа
-        output_frame = tk.Frame(main_frame)
-        output_frame.pack(side=tk.RIGHT, fill=tk.BOTH, expand=True)
+        # Правая панель (результаты)
+        right_panel = tk.Frame(main_frame)
+        right_panel.pack(side=tk.RIGHT, fill=tk.BOTH, expand=True)
 
-        # Создаем Notebook (вкладки) для вывода
-        self.notebook = ttk.Notebook(output_frame)
+        # Notebook с вкладками
+        self.notebook = ttk.Notebook(right_panel)
         self.notebook.pack(fill=tk.BOTH, expand=True)
 
-        # Добавляем начальную вкладку для логов
+        # Вкладка логов
         self.log_tab = tk.Frame(self.notebook)
-        self.notebook.add(self.log_tab, text="Log")
-
+        self.notebook.add(self.log_tab, text="Логи")
         self.log_text = scrolledtext.ScrolledText(self.log_tab, wrap=tk.WORD)
         self.log_text.pack(fill=tk.BOTH, expand=True)
 
         # Статус бар
         self.status_var = tk.StringVar()
-        self.status_var.set("Ready")
+        self.status_var.set("Готов к работе")
         status_bar = tk.Label(self.root, textvariable=self.status_var, bd=1, relief=tk.SUNKEN, anchor=tk.W)
         status_bar.pack(side=tk.BOTTOM, fill=tk.X)
 
