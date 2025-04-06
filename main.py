@@ -12,13 +12,11 @@ from datetime import datetime
 class SSHClientApp:
     def __init__(self, root):
         self.root = root
-        self.root.title("SSH Multi-Command Device Manager")
+        self.root.title("SSH Multi-Command Device Manager with Credentials")
         self.root.geometry("1100x750")
 
         # Переменные для хранения данных
-        self.ip_list = []
-        self.username = ""
-        self.password = ""
+        self.devices = []  # Список устройств: [{'ip': '', 'logins': [{'user':'', 'pass':''}]}]
         self.commands = []
         self.results = {}
         self.output_queue = Queue()
@@ -41,20 +39,8 @@ class SSHClientApp:
         control_frame.pack(side=tk.LEFT, fill=tk.Y, padx=(0, 5))
         control_frame.pack_propagate(False)
 
-        # Фрейм для ввода учетных данных
-        cred_frame = tk.LabelFrame(control_frame, text="SSH Credentials", padx=5, pady=5)
-        cred_frame.pack(fill=tk.X, padx=5, pady=5)
-
-        tk.Label(cred_frame, text="Username:").grid(row=0, column=0, sticky=tk.W)
-        self.username_entry = tk.Entry(cred_frame)
-        self.username_entry.grid(row=0, column=1, sticky=tk.EW, padx=5)
-
-        tk.Label(cred_frame, text="Password:").grid(row=1, column=0, sticky=tk.W)
-        self.password_entry = tk.Entry(cred_frame, show="*")
-        self.password_entry.grid(row=1, column=1, sticky=tk.EW, padx=5)
-
-        # Фрейм для загрузки файла с IP-адресами
-        file_frame = tk.LabelFrame(control_frame, text="IP Address List", padx=5, pady=5)
+        # Фрейм для загрузки файла с устройствами
+        file_frame = tk.LabelFrame(control_frame, text="Device List (Excel with IP, Logins, Passwords)", padx=5, pady=5)
         file_frame.pack(fill=tk.X, padx=5, pady=5)
 
         self.file_path = tk.StringVar()
@@ -109,27 +95,49 @@ class SSHClientApp:
 
     def browse_file(self):
         filetypes = (("Excel files", "*.xlsx *.xls"), ("All files", "*.*"))
-        filename = filedialog.askopenfilename(title="Open IP list", filetypes=filetypes)
+        filename = filedialog.askopenfilename(title="Open devices list", filetypes=filetypes)
         if filename:
             self.file_path.set(filename)
             try:
+                # Чтение Excel файла
                 df = pd.read_excel(filename)
-                self.ip_list = df.iloc[:, 0].dropna().astype(str).tolist()
-                self.log_message(f"Loaded {len(self.ip_list)} IP addresses from file.")
+
+                # Группировка по IP и сбор всех комбинаций логин/пароль
+                self.devices = []
+
+                # Проверяем, что есть хотя бы 3 столбца
+                if len(df.columns) < 3:
+                    raise ValueError("Excel file must have at least 3 columns: IP, Login, Password")
+
+                # Группируем данные по IP
+                grouped = df.groupby(df.columns[0])
+
+                for ip, group in grouped:
+                    logins = []
+                    for _, row in group.iterrows():
+                        if len(row) >= 3:  # Проверяем, что есть логин и пароль
+                            logins.append({
+                                'user': str(row.iloc[1]),
+                                'pass': str(row.iloc[2])
+                            })
+
+                    if logins:
+                        self.devices.append({
+                            'ip': str(ip),
+                            'logins': logins
+                        })
+
+                self.log_message(
+                    f"Loaded {len(self.devices)} devices with {sum(len(d['logins']) for d in self.devices)} credentials from file.")
+
             except Exception as e:
                 self.log_message(f"Error loading file: {str(e)}")
 
     def start_execution(self):
-        self.username = self.username_entry.get()
-        self.password = self.password_entry.get()
         self.commands = [entry.get() for entry in self.command_entries if entry.get().strip()]
 
-        if not self.username or not self.password:
-            messagebox.showerror("Error", "Please enter username and password")
-            return
-
-        if not self.ip_list:
-            messagebox.showerror("Error", "No IP addresses loaded")
+        if not self.devices:
+            messagebox.showerror("Error", "No devices loaded")
             return
 
         if not self.commands:
@@ -141,83 +149,112 @@ class SSHClientApp:
         self.clear_tabs()
 
         # Обновление статуса
-        self.status_var.set(f"Executing {len(self.commands)} commands on {len(self.ip_list)} devices...")
+        self.status_var.set(f"Executing {len(self.commands)} commands on {len(self.devices)} devices...")
 
         # Запуск выполнения в отдельном потоке
         Thread(target=self.execute_commands, daemon=True).start()
 
     def execute_commands(self):
-        for ip in self.ip_list:
-            try:
-                self.log_message(f"\nConnecting to {ip}...")
+        for device in self.devices:
+            ip = device['ip']
+            self.log_message(f"\nProcessing device: {ip}")
 
-                # Создание SSH клиента
-                ssh = paramiko.SSHClient()
-                ssh.set_missing_host_key_policy(paramiko.AutoAddPolicy())
+            # Создаем вкладку для устройства
+            self.create_device_tab(ip)
 
-                # Подключение
-                ssh.connect(ip, username=self.username, password=self.password, timeout=10)
-                self.log_message(f"Connected to {ip}")
+            # Пытаемся подключиться с разными учетными данными
+            connected = False
+            ssh = None
+            used_credentials = None
 
-                # Создаем вкладку для устройства
-                self.create_device_tab(ip)
+            for cred in device['logins']:
+                username = cred['user']
+                password = cred['pass']
 
-                # Выполняем команды по очереди
-                all_commands_result = []
-                command_success = True
+                try:
+                    self.log_message(f"Trying credentials: {username}/{password}")
+                    self.update_device_tab(ip, f"Trying credentials: {username}/{'*' * len(password)}\n")
 
-                for i, cmd in enumerate(self.commands, 1):
-                    if not command_success:
-                        break  # Прерываем выполнение если была ошибка
+                    # Создание SSH клиента
+                    ssh = paramiko.SSHClient()
+                    ssh.set_missing_host_key_policy(paramiko.AutoAddPolicy())
 
-                    try:
-                        self.log_message(f"Executing command {i} on {ip}: {cmd}")
-                        self.update_device_tab(ip, f"Executing command {i}:\n{cmd}\n\n")
+                    # Подключение
+                    ssh.connect(ip, username=username, password=password, timeout=10)
+                    connected = True
+                    used_credentials = f"{username}/{password}"
+                    self.log_message(f"Successfully connected to {ip} with {username}")
+                    self.update_device_tab(ip, f"Connected with: {username}\n\n")
+                    break
 
-                        # Выполнение команды
-                        stdin, stdout, stderr = ssh.exec_command(cmd)
+                except Exception as e:
+                    error_msg = f"Failed to connect with {username}: {str(e)}"
+                    self.log_message(error_msg)
+                    self.update_device_tab(ip, f"{error_msg}\n")
+                    if ssh:
+                        ssh.close()
+                    continue
 
-                        # Чтение вывода
-                        output = stdout.read().decode().strip()
-                        error = stderr.read().decode().strip()
-
-                        # Задержка между командами
-                        if i < len(self.commands):
-                            time.sleep(self.delay)
-
-                        if error:
-                            result = f"Command {i} ERROR:\n{error}"
-                            command_success = False
-                        else:
-                            result = f"Command {i} output:\n{output}"
-
-                        # Добавляем результат
-                        all_commands_result.append(result)
-                        self.update_device_tab(ip, f"{result}\n\n")
-                        self.log_message(f"Command {i} executed on {ip}")
-
-                    except Exception as e:
-                        error_msg = f"Failed to execute command {i} on {ip}: {str(e)}"
-                        all_commands_result.append(error_msg)
-                        self.update_device_tab(ip, f"{error_msg}\n\n")
-                        self.log_message(error_msg)
-                        command_success = False
-
-                # Сохраняем все результаты для этого устройства
-                self.results[ip] = "\n".join(all_commands_result)
-
-                # Закрытие соединения
-                ssh.close()
-                self.log_message(f"Disconnected from {ip}")
-
-            except Exception as e:
-                error_msg = f"Failed to connect to {ip}: {str(e)}"
+            if not connected:
+                error_msg = f"Could not connect to {ip} with any credentials"
                 self.results[ip] = error_msg
-                self.create_device_tab(ip, error_msg)
+                self.update_device_tab(ip, f"\n{error_msg}\n")
                 self.log_message(error_msg)
+                continue
+
+            # Выполняем команды по очереди
+            all_commands_result = []
+            command_success = True
+
+            for i, cmd in enumerate(self.commands, 1):
+                if not command_success:
+                    break  # Прерываем выполнение если была ошибка
+
+                try:
+                    self.log_message(f"Executing command {i} on {ip}: {cmd}")
+                    self.update_device_tab(ip, f"Executing command {i}:\n{cmd}\n\n")
+
+                    # Выполнение команды
+                    stdin, stdout, stderr = ssh.exec_command(cmd)
+
+                    # Чтение вывода
+                    output = stdout.read().decode().strip()
+                    error = stderr.read().decode().strip()
+
+                    # Задержка между командами
+                    if i < len(self.commands):
+                        time.sleep(self.delay)
+
+                    if error:
+                        result = f"Command {i} ERROR:\n{error}"
+                        command_success = False
+                    else:
+                        result = f"Command {i} output:\n{output}"
+
+                    # Добавляем результат
+                    all_commands_result.append(result)
+                    self.update_device_tab(ip, f"{result}\n\n")
+                    self.log_message(f"Command {i} executed on {ip}")
+
+                except Exception as e:
+                    error_msg = f"Failed to execute command {i} on {ip}: {str(e)}"
+                    all_commands_result.append(error_msg)
+                    self.update_device_tab(ip, f"{error_msg}\n\n")
+                    self.log_message(error_msg)
+                    command_success = False
+
+            # Сохраняем все результаты для этого устройства
+            self.results[ip] = {
+                'credentials': used_credentials,
+                'commands': "\n".join(all_commands_result)
+            }
+
+            # Закрытие соединения
+            ssh.close()
+            self.log_message(f"Disconnected from {ip}")
 
         self.log_message("\nExecution completed!")
-        self.status_var.set(f"Completed. Processed {len(self.ip_list)} devices.")
+        self.status_var.set(f"Completed. Processed {len(self.devices)} devices.")
 
     def create_device_tab(self, ip, initial_text=None):
         # Создаем новую вкладку для устройства
@@ -284,7 +321,8 @@ class SSHClientApp:
 
                     for ip, result in self.results.items():
                         f.write(f"=== {ip} ===\n")
-                        f.write(f"{result}\n\n")
+                        f.write(f"Credentials used: {result['credentials']}\n")
+                        f.write(f"{result['commands']}\n\n")
 
                 self.log_message(f"Results saved to {save_path}")
                 self.status_var.set(f"Results saved to {os.path.basename(save_path)}")
