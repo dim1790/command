@@ -7,17 +7,24 @@ from tkinter import ttk, filedialog, messagebox, scrolledtext
 from threading import Thread
 from queue import Queue
 from datetime import datetime
+import os
+import sys
+
+# Решение проблем с pandas при сборке
+if getattr(sys, 'frozen', False):
+    # Если программа запущена как собранный EXE
+    os.environ['PATH'] = sys._MEIPASS + ";" + os.environ['PATH']
 
 
 class SSHClientApp:
     def __init__(self, root):
         self.root = root
-        self.root.title("SSH Device Commander with Credential Rotation")
+        self.root.title("Advanced SSH Device Commander")
         self.root.geometry("1100x750")
 
         # Переменные для хранения данных
         self.ip_list = []  # Список IP-адресов из первого столбца
-        self.credentials = []  # Список учетных данных (логин, пароль) из 2 и 3 столбцов
+        self.credentials = []  # Список всех уникальных пар логин/пароль
         self.commands = []
         self.results = {}
         self.output_queue = Queue()
@@ -113,16 +120,13 @@ class SSHClientApp:
 
                 # Получаем все уникальные пары логин/пароль из 2 и 3 столбцов
                 creds = df.iloc[:, 1:3].dropna()
-                self.credentials = list(zip(
+                self.credentials = list(set(zip(
                     creds.iloc[:, 0].astype(str),
                     creds.iloc[:, 1].astype(str)
-                ))
-
-                # Удаляем дубликаты учетных данных
-                self.credentials = list(set(self.credentials))
+                )))
 
                 self.log_message(
-                    f"Loaded {len(self.ip_list)} IP addresses and {len(self.credentials)} credential pairs from file.")
+                    f"Loaded {len(self.ip_list)} IP addresses and {len(self.credentials)} unique credential pairs from file.")
 
             except Exception as e:
                 self.log_message(f"Error loading file: {str(e)}")
@@ -157,7 +161,7 @@ class SSHClientApp:
             self.log_message(f"\nProcessing device: {ip}")
             self.create_device_tab(ip)
 
-            # Пытаемся подключиться с разными учетными данными
+            # Для каждого устройства начинаем перебор учетных данных заново
             connected = False
             ssh = None
             used_credentials = None
@@ -238,15 +242,18 @@ class SSHClientApp:
             # Сохраняем все результаты для этого устройства
             self.results[ip] = {
                 'credentials': used_credentials,
-                'commands': "\n".join(all_commands_result)
+                'commands': "\n".join(all_commands_result),
+                'success': connected
             }
 
             # Закрытие соединения
-            ssh.close()
-            self.log_message(f"Disconnected from {ip}")
+            if ssh:
+                ssh.close()
+                self.log_message(f"Disconnected from {ip}")
 
         self.log_message("\nExecution completed!")
-        self.status_var.set(f"Completed. Processed {len(self.ip_list)} devices.")
+        success_count = sum(1 for res in self.results.values() if res['success'])
+        self.status_var.set(f"Completed. Success: {success_count}/{len(self.ip_list)} devices.")
 
     def create_device_tab(self, ip, initial_text=None):
         if ip in self.active_tabs:
@@ -300,14 +307,16 @@ class SSHClientApp:
                     f.write(f"Executed commands:\n")
                     for i, cmd in enumerate(self.commands, 1):
                         f.write(f"{i}. {cmd}\n")
-                    f.write("\nAvailable credentials used:\n")
+                    f.write("\nAvailable credentials:\n")
                     for user, pwd in self.credentials:
                         f.write(f"{user}/{pwd}\n")
                     f.write("\n")
 
                     for ip, result in self.results.items():
                         f.write(f"=== {ip} ===\n")
-                        f.write(f"Credentials used: {result['credentials']}\n")
+                        f.write(f"Status: {'SUCCESS' if result['success'] else 'FAILED'}\n")
+                        if result['success']:
+                            f.write(f"Credentials used: {result['credentials']}\n")
                         f.write(f"{result['commands']}\n\n")
 
                 self.log_message(f"Results saved to {save_path}")
