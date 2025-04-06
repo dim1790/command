@@ -42,16 +42,16 @@ class SSHClientApp:
 
     def create_watermark(self):
         """Создание водяного знака"""
-        watermark = Image.new('RGBA', (250, 100), (255, 255, 255, 0))
+        watermark = Image.new('RGBA', (250, 60), (255, 255, 255, 0))
         draw = ImageDraw.Draw(watermark)
         try:
             font = ImageFont.truetype("arial.ttf", 24)
         except:
             font = ImageFont.load_default()
-        draw.text((10, 10), "FGMP1790", fill=(150, 150, 150, 100), font=font)
+        draw.text((10, 10), "COMMANDER\nby FGMP1790", fill=(150, 150, 150, 100), font=font)
         self.watermark_image = ImageTk.PhotoImage(watermark)
         self.watermark_label = tk.Label(self.root, image=self.watermark_image, bd=0)
-        self.watermark_label.place(relx=0.01, rely=0.98, anchor='sw')
+        self.watermark_label.place(relx=0.01, rely=0.93, anchor='sw')
 
     def create_widgets(self):
         """Создание интерфейса"""
