@@ -12,11 +12,12 @@ from datetime import datetime
 class SSHClientApp:
     def __init__(self, root):
         self.root = root
-        self.root.title("SSH Multi-Command Device Manager with Credentials")
+        self.root.title("SSH Device Commander with Credential Rotation")
         self.root.geometry("1100x750")
 
         # Переменные для хранения данных
-        self.devices = []  # Список устройств: [{'ip': '', 'logins': [{'user':'', 'pass':''}]}]
+        self.ip_list = []  # Список IP-адресов из первого столбца
+        self.credentials = []  # Список учетных данных (логин, пароль) из 2 и 3 столбцов
         self.commands = []
         self.results = {}
         self.output_queue = Queue()
@@ -39,8 +40,9 @@ class SSHClientApp:
         control_frame.pack(side=tk.LEFT, fill=tk.Y, padx=(0, 5))
         control_frame.pack_propagate(False)
 
-        # Фрейм для загрузки файла с устройствами
-        file_frame = tk.LabelFrame(control_frame, text="Device List (Excel with IP, Logins, Passwords)", padx=5, pady=5)
+        # Фрейм для загрузки файла
+        file_frame = tk.LabelFrame(control_frame, text="Device List (Excel: IPs in 1st col, creds in 2nd/3rd)", padx=5,
+                                   pady=5)
         file_frame.pack(fill=tk.X, padx=5, pady=5)
 
         self.file_path = tk.StringVar()
@@ -102,33 +104,25 @@ class SSHClientApp:
                 # Чтение Excel файла
                 df = pd.read_excel(filename)
 
-                # Группировка по IP и сбор всех комбинаций логин/пароль
-                self.devices = []
-
                 # Проверяем, что есть хотя бы 3 столбца
                 if len(df.columns) < 3:
-                    raise ValueError("Excel file must have at least 3 columns: IP, Login, Password")
+                    raise ValueError("Excel file must have at least 3 columns")
 
-                # Группируем данные по IP
-                grouped = df.groupby(df.columns[0])
+                # Получаем уникальные IP из первого столбца
+                self.ip_list = df.iloc[:, 0].dropna().astype(str).unique().tolist()
 
-                for ip, group in grouped:
-                    logins = []
-                    for _, row in group.iterrows():
-                        if len(row) >= 3:  # Проверяем, что есть логин и пароль
-                            logins.append({
-                                'user': str(row.iloc[1]),
-                                'pass': str(row.iloc[2])
-                            })
+                # Получаем все уникальные пары логин/пароль из 2 и 3 столбцов
+                creds = df.iloc[:, 1:3].dropna()
+                self.credentials = list(zip(
+                    creds.iloc[:, 0].astype(str),
+                    creds.iloc[:, 1].astype(str)
+                ))
 
-                    if logins:
-                        self.devices.append({
-                            'ip': str(ip),
-                            'logins': logins
-                        })
+                # Удаляем дубликаты учетных данных
+                self.credentials = list(set(self.credentials))
 
                 self.log_message(
-                    f"Loaded {len(self.devices)} devices with {sum(len(d['logins']) for d in self.devices)} credentials from file.")
+                    f"Loaded {len(self.ip_list)} IP addresses and {len(self.credentials)} credential pairs from file.")
 
             except Exception as e:
                 self.log_message(f"Error loading file: {str(e)}")
@@ -136,8 +130,12 @@ class SSHClientApp:
     def start_execution(self):
         self.commands = [entry.get() for entry in self.command_entries if entry.get().strip()]
 
-        if not self.devices:
-            messagebox.showerror("Error", "No devices loaded")
+        if not self.ip_list:
+            messagebox.showerror("Error", "No IP addresses loaded")
+            return
+
+        if not self.credentials:
+            messagebox.showerror("Error", "No credentials loaded")
             return
 
         if not self.commands:
@@ -149,17 +147,14 @@ class SSHClientApp:
         self.clear_tabs()
 
         # Обновление статуса
-        self.status_var.set(f"Executing {len(self.commands)} commands on {len(self.devices)} devices...")
+        self.status_var.set(f"Executing {len(self.commands)} commands on {len(self.ip_list)} devices...")
 
         # Запуск выполнения в отдельном потоке
         Thread(target=self.execute_commands, daemon=True).start()
 
     def execute_commands(self):
-        for device in self.devices:
-            ip = device['ip']
+        for ip in self.ip_list:
             self.log_message(f"\nProcessing device: {ip}")
-
-            # Создаем вкладку для устройства
             self.create_device_tab(ip)
 
             # Пытаемся подключиться с разными учетными данными
@@ -167,28 +162,25 @@ class SSHClientApp:
             ssh = None
             used_credentials = None
 
-            for cred in device['logins']:
-                username = cred['user']
-                password = cred['pass']
-
+            for user, pwd in self.credentials:
                 try:
-                    self.log_message(f"Trying credentials: {username}/{password}")
-                    self.update_device_tab(ip, f"Trying credentials: {username}/{'*' * len(password)}\n")
+                    self.log_message(f"Trying credentials: {user}/{pwd}")
+                    self.update_device_tab(ip, f"Trying credentials: {user}/{'*' * len(pwd)}\n")
 
                     # Создание SSH клиента
                     ssh = paramiko.SSHClient()
                     ssh.set_missing_host_key_policy(paramiko.AutoAddPolicy())
 
                     # Подключение
-                    ssh.connect(ip, username=username, password=password, timeout=10)
+                    ssh.connect(ip, username=user, password=pwd, timeout=10)
                     connected = True
-                    used_credentials = f"{username}/{password}"
-                    self.log_message(f"Successfully connected to {ip} with {username}")
-                    self.update_device_tab(ip, f"Connected with: {username}\n\n")
+                    used_credentials = f"{user}/{pwd}"
+                    self.log_message(f"Successfully connected to {ip} with {user}")
+                    self.update_device_tab(ip, f"Connected with: {user}\n\n")
                     break
 
                 except Exception as e:
-                    error_msg = f"Failed to connect with {username}: {str(e)}"
+                    error_msg = f"Failed to connect with {user}: {str(e)}"
                     self.log_message(error_msg)
                     self.update_device_tab(ip, f"{error_msg}\n")
                     if ssh:
@@ -254,31 +246,24 @@ class SSHClientApp:
             self.log_message(f"Disconnected from {ip}")
 
         self.log_message("\nExecution completed!")
-        self.status_var.set(f"Completed. Processed {len(self.devices)} devices.")
+        self.status_var.set(f"Completed. Processed {len(self.ip_list)} devices.")
 
     def create_device_tab(self, ip, initial_text=None):
-        # Создаем новую вкладку для устройства
         if ip in self.active_tabs:
             return
 
         tab = tk.Frame(self.notebook)
-
-        # Добавляем текстовое поле с прокруткой
         text = scrolledtext.ScrolledText(tab, wrap=tk.WORD)
         text.pack(fill=tk.BOTH, expand=True)
 
-        # Вставляем начальный текст если есть
         if initial_text:
             text.insert(tk.END, f"Results from {ip}:\n\n")
             text.insert(tk.END, initial_text)
 
         text.configure(state='disabled')
-
-        # Добавляем вкладку в Notebook
         self.notebook.add(tab, text=ip)
-        self.notebook.select(tab)  # Переключаемся на новую вкладку
+        self.notebook.select(tab)
 
-        # Сохраняем ссылки
         self.active_tabs[ip] = {
             'tab': tab,
             'text': text
@@ -300,11 +285,9 @@ class SSHClientApp:
             return
 
         try:
-            # Создание имени файла с временной меткой
             timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
             filename = f"ssh_results_{timestamp}.txt"
 
-            # Запрос места сохранения
             save_path = filedialog.asksaveasfilename(
                 defaultextension=".txt",
                 initialfile=filename,
@@ -317,6 +300,9 @@ class SSHClientApp:
                     f.write(f"Executed commands:\n")
                     for i, cmd in enumerate(self.commands, 1):
                         f.write(f"{i}. {cmd}\n")
+                    f.write("\nAvailable credentials used:\n")
+                    for user, pwd in self.credentials:
+                        f.write(f"{user}/{pwd}\n")
                     f.write("\n")
 
                     for ip, result in self.results.items():
@@ -332,12 +318,10 @@ class SSHClientApp:
             self.status_var.set("Error saving results")
 
     def clear_tabs(self):
-        # Удаляем все вкладки кроме логов
         for ip, data in list(self.active_tabs.items()):
             self.notebook.forget(data['tab'])
             del self.active_tabs[ip]
 
-        # Очищаем лог
         self.log_text.configure(state='normal')
         self.log_text.delete(1.0, tk.END)
         self.log_text.configure(state='disabled')
@@ -355,8 +339,6 @@ class SSHClientApp:
     def check_queue(self):
         while not self.output_queue.empty():
             msg = self.output_queue.get()
-
-            # Обновляем лог
             self.log_text.configure(state='normal')
             self.log_text.insert(tk.END, msg + "\n")
             self.log_text.configure(state='disabled')
