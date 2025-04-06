@@ -43,10 +43,11 @@ class SSHClientApp:
             font = ImageFont.truetype("arial.ttf", 24)
         except:
             font = ImageFont.load_default()
-        draw.text((10, 10), "COMMANDER\nby FGMP1790", fill=(150, 150, 150, 100), font=font)
+        draw.text((10, 10), "FGMP1790", fill=(150, 150, 150, 100), font=font)
         self.watermark_image = ImageTk.PhotoImage(watermark)
         self.watermark_label = tk.Label(self.root, image=self.watermark_image, bd=0)
         self.watermark_label.place(relx=0.01, rely=0.98, anchor='sw')
+
 
     def create_widgets(self):
         # Основной контейнер
@@ -82,8 +83,8 @@ class SSHClientApp:
         file_frame.pack(fill=tk.X, padx=5, pady=5)
 
         self.file_path = tk.StringVar()
-        tk.Entry(file_frame, textvariable=self.file_path, state='readonly').pack(side=tk.LEFT, fill=tk.X, expand=True,
-                                                                                 padx=5)
+        tk.Entry(file_frame, textvariable=self.file_path, state='readonly').pack(side=tk.LEFT, fill=tk.X,
+                                                                                 expand=True, padx=5)
         tk.Button(file_frame, text="Обзор", command=self.browse_file).pack(side=tk.RIGHT, padx=5)
 
         # Фрейм для ввода команд
@@ -103,11 +104,12 @@ class SSHClientApp:
         btn_frame = tk.Frame(left_panel)
         btn_frame.pack(fill=tk.X, padx=5, pady=10)
 
-        tk.Button(btn_frame, text="Выполнить", command=self.start_execution).pack(side=tk.LEFT, fill=tk.X, expand=True,
-                                                                                  padx=2)
+        tk.Button(btn_frame, text="Выполнить", command=self.start_execution).pack(side=tk.LEFT, fill=tk.X,
+                                                                                  expand=True, padx=2)
         tk.Button(btn_frame, text="Сохранить", command=self.save_results).pack(side=tk.LEFT, fill=tk.X, expand=True,
                                                                                padx=2)
-        tk.Button(btn_frame, text="Очистить", command=self.clear_all).pack(side=tk.LEFT, fill=tk.X, expand=True, padx=2)
+        tk.Button(btn_frame, text="Очистить", command=self.clear_all).pack(side=tk.LEFT, fill=tk.X, expand=True,
+                                                                           padx=2)
 
         # Правая панель (результаты)
         right_panel = tk.Frame(main_frame)
@@ -387,3 +389,4 @@ if __name__ == "__main__":
     root = tk.Tk()
     app = SSHClientApp(root)
     root.mainloop()
+
