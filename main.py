@@ -15,26 +15,27 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 
 class SSHClientApp:
     def __init__(self, root):
+        """Инициализация главного окна приложения"""
         self.root = root
         self.root.title("Parallel SSH Commander")
         self.root.geometry("1200x800")
 
         # Параметры выполнения
-        self.max_workers = 5
+        self.max_workers = 5  # Максимальное количество одновременных подключений
         self.semaphore = Semaphore(self.max_workers)
         self.stop_event = Event()
-        self.command_timeout = 10
-        self.delay = 3
+        self.command_timeout = 10  # Таймаут выполнения команды (сек)
+        self.delay = 3  # Задержка между командами (сек)
 
-        # Данные
-        self.ip_list = []
-        self.credentials = []
-        self.commands = []
-        self.results = {}
-        self.active_tabs = {}
-        self.output_queue = Queue()
+        # Структуры данных
+        self.ip_list = []  # Список IP-адресов устройств
+        self.credentials = []  # Список учетных данных (логин, пароль)
+        self.commands = []  # Список команд для выполнения
+        self.results = {}  # Результаты выполнения (исправлено: теперь сохраняет правильно)
+        self.active_tabs = {}  # Активные вкладки устройств
+        self.output_queue = Queue()  # Очередь для вывода сообщений
 
-        # Создание интерфейса
+        # Инициализация интерфейса
         self.create_widgets()
         self.create_watermark()
         self.check_queue()
@@ -192,13 +193,21 @@ class SSHClientApp:
         self.status_var.set(f"Завершено. Успешно: {success_count}/{len(self.ip_list)}")
 
     def process_device(self, ip):
-        """Обработка одного устройства"""
+        """Обработка одного устройства (выполняется в отдельном потоке)"""
         with self.semaphore:
             if self.stop_event.is_set():
                 return
 
             self.log_message(f"\nОбработка устройства: {ip}")
             text_widget = self.create_device_tab(ip)
+
+            # Инициализация записи результатов для этого IP
+            self.results[ip] = {
+                'success': False,
+                'credentials': None,
+                'output': "",
+                'errors': []
+            }
 
             ssh = self.connect_to_device(ip, text_widget)
             if not ssh:
@@ -208,10 +217,24 @@ class SSHClientApp:
                 for cmd in self.commands:
                     if self.stop_event.is_set():
                         break
-                    self.execute_single_command(ssh, ip, cmd, text_widget)
+
+                    # Выполнение команды и сохранение результатов
+                    command_output = self.execute_single_command(ssh, ip, cmd, text_widget)
+                    self.results[ip]['output'] += f"\nКоманда: {cmd}\n{command_output}\n"
+
+            except Exception as e:
+                error_msg = f"Ошибка выполнения на {ip}: {str(e)}"
+                self.results[ip]['errors'].append(error_msg)
+                self.log_message(error_msg)
+                self.update_device_tab(text_widget, f"\n{error_msg}\n")
+
             finally:
                 ssh.close()
                 self.log_message(f"Отключено от {ip}")
+
+                # Помечаем как успешное, если не было ошибок
+                if not self.results[ip]['errors']:
+                    self.results[ip]['success'] = True
 
     def connect_to_device(self, ip, text_widget):
         """Подключение к устройству"""
@@ -242,7 +265,7 @@ class SSHClientApp:
         return None
 
     def execute_single_command(self, ssh, ip, cmd, text_widget):
-        """Выполнение одной команды"""
+        """Выполнение одной команды с сохранением вывода"""
         self.log_message(f"Выполнение команды: {cmd}")
         self.update_device_tab(text_widget, f"Команда:\n{cmd}\n\n")
 
@@ -254,28 +277,40 @@ class SSHClientApp:
         output = ""
 
         while not self.stop_event.is_set():
+            # Чтение стандартного вывода
             while channel.recv_ready():
-                output += channel.recv(1024).decode('utf-8')
-                self.update_device_tab(text_widget, output)
+                data = channel.recv(1024).decode('utf-8')
+                output += data
+                self.update_device_tab(text_widget, data)
 
+            # Чтение вывода ошибок
             while channel.recv_stderr_ready():
-                output += channel.recv_stderr(1024).decode('utf-8')
-                self.update_device_tab(text_widget, output)
+                error_data = channel.recv_stderr(1024).decode('utf-8')
+                output += error_data
+                self.update_device_tab(text_widget, error_data)
 
+            # Проверка завершения команды
             if channel.exit_status_ready() or (time.time() - start_time) > self.command_timeout:
                 break
 
             time.sleep(0.1)
 
-        if not channel.exit_status_ready():
-            channel.close()
-            self.update_device_tab(text_widget, f"\nПревышено время ожидания ({self.command_timeout} сек)\n")
-        else:
+        # Обработка завершения команды
+        exit_status = -1
+        if channel.exit_status_ready():
             exit_status = channel.recv_exit_status()
-            self.update_device_tab(text_widget, f"\nКоманда завершена с кодом: {exit_status}\n")
+            status_msg = f"\nКоманда завершена с кодом: {exit_status}\n"
+        else:
+            channel.close()
+            status_msg = f"\nПревышено время ожидания ({self.command_timeout} сек)\n"
+
+        self.update_device_tab(text_widget, status_msg)
+        output += status_msg
 
         if not self.stop_event.is_set():
             time.sleep(self.delay)
+
+        return output
 
     def create_device_tab(self, ip):
         """Создание вкладки для устройства"""
@@ -306,9 +341,10 @@ class SSHClientApp:
         text_widget.see(tk.END)
 
     def save_results(self):
-        """Сохранение результатов"""
-        if not self.results:
-            messagebox.showerror("Ошибка", "Нет результатов для сохранения")
+        """Сохранение результатов в файл"""
+        # Проверка наличия результатов
+        if not self.results or all(not res['output'] for res in self.results.values()):
+            messagebox.showerror("Ошибка", "Нет данных для сохранения")
             return
 
         try:
@@ -323,28 +359,47 @@ class SSHClientApp:
 
             if save_path:
                 with open(save_path, 'w', encoding='utf-8') as f:
-                    f.write(f"Результаты выполнения команд - {timestamp}\n\n")
-                    f.write(f"Выполненные команды:\n")
+                    # Заголовок
+                    f.write("╔══════════════════════════════════╗\n")
+                    f.write("║      SSH COMMANDER - RESULTS     ║\n")
+                    f.write("╚══════════════════════════════════╝\n\n")
+
+                    # Общая информация
+                    f.write(f"Дата выполнения: {timestamp}\n")
+                    f.write(f"Устройств обработано: {len(self.results)}\n")
+                    f.write(f"Успешных подключений: {sum(1 for res in self.results.values() if res['success'])}\n\n")
+
+                    # Выполненные команды
+                    f.write("═" * 50 + "\n")
+                    f.write("Выполненные команды:\n")
                     for i, cmd in enumerate(self.commands, 1):
                         f.write(f"{i}. {cmd}\n")
-                    f.write("\nДоступные учетные данные:\n")
-                    for user, pwd in self.credentials:
-                        f.write(f"{user}/{pwd}\n")
                     f.write("\n")
 
+                    # Результаты по устройствам
                     for ip, result in self.results.items():
-                        f.write(f"=== {ip} ===\n")
-                        f.write(f"Статус: {'УСПЕХ' if result['success'] else 'ОШИБКА'}\n")
-                        if not result['success']:
-                            f.write(f"Ошибка: {result.get('error', 'Неизвестная ошибка')}\n")
-                        f.write(f"{result.get('output', '')}\n\n")
+                        f.write("═" * 50 + "\n")
+                        f.write(f"Устройство: {ip}\n")
+                        f.write(f"Статус: {'✅ УСПЕШНО' if result['success'] else '❌ ОШИБКА'}\n")
 
-                self.log_message(f"Результаты сохранены в {save_path}")
+                        if result['credentials']:
+                            f.write(f"Учетные данные: {result['credentials']}\n")
+
+                        if result['errors']:
+                            f.write("\nОшибки:\n")
+                            for error in result['errors']:
+                                f.write(f"- {error}\n")
+
+                        f.write("\nВывод команд:\n")
+                        f.write(result['output'])
+                        f.write("\n")
+
+                self.log_message(f"Результаты сохранены в: {save_path}")
                 self.status_var.set(f"Сохранено: {os.path.basename(save_path)}")
 
         except Exception as e:
             self.log_message(f"Ошибка сохранения: {str(e)}")
-            self.status_var.set("Ошибка сохранения")
+            messagebox.showerror("Ошибка", f"Не удалось сохранить файл:\n{str(e)}")
 
     def clear_tabs(self):
         """Очистка вкладок"""
@@ -386,14 +441,16 @@ if __name__ == "__main__":
     root = tk.Tk()
     app = SSHClientApp(root)
 
-    # Меню для настройки параллельных подключений
+    # Меню для настройки
     menu = tk.Menu(root)
     root.config(menu=menu)
 
     settings_menu = tk.Menu(menu, tearoff=0)
-    menu.add_cascade(label="Настройки", menu=settings_menu)
-    settings_menu.add_command(label="Макс. подключений: 5", command=lambda: setattr(app, 'max_workers', 5))
-    settings_menu.add_command(label="Макс. подключений: 10", command=lambda: setattr(app, 'max_workers', 10))
-    settings_menu.add_command(label="Макс. подключений: 15", command=lambda: setattr(app, 'max_workers', 15))
+    menu.add_cascade(label="Настройки ⚙️", menu=settings_menu)
+
+    for workers in [5, 10, 15]:
+        settings_menu.add_command(
+            label=f"Макс. подключений: {workers}",
+            command=lambda w=workers: setattr(app, 'max_workers', w))
 
     root.mainloop()
