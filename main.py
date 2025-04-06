@@ -16,163 +16,131 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 class SSHClientApp:
     def __init__(self, root):
         self.root = root
-        self.root.title("Parallel SSH Commander Pro")
-        self.root.geometry("1300x850")
+        self.root.title("Parallel SSH Commander")
+        self.root.geometry("1200x800")
 
-        # Настройки выполнения
+        # Параметры выполнения
         self.max_workers = 5
         self.semaphore = Semaphore(self.max_workers)
         self.stop_event = Event()
-        self.command_timeout = 15
-        self.delay = 2
+        self.command_timeout = 10
+        self.delay = 3
 
         # Данные
         self.ip_list = []
         self.credentials = []
         self.commands = []
         self.results = {}
-        self.output_queue = Queue()
         self.active_tabs = {}
+        self.output_queue = Queue()
 
-        # Инициализация интерфейса
+        # Создание интерфейса
         self.create_widgets()
         self.create_watermark()
-        self.create_menu()
         self.check_queue()
 
     def create_watermark(self):
         """Создание водяного знака"""
-        watermark = Image.new('RGBA', (300, 120), (255, 255, 255, 0))
+        watermark = Image.new('RGBA', (250, 100), (255, 255, 255, 0))
         draw = ImageDraw.Draw(watermark)
         try:
-            font = ImageFont.truetype("arial.ttf", 30)
+            font = ImageFont.truetype("arial.ttf", 24)
         except:
             font = ImageFont.load_default()
-        draw.text((20, 20), "FGMP1790", fill=(180, 180, 180, 80), font=font)
+        draw.text((10, 10), "FGMP1790", fill=(150, 150, 150, 100), font=font)
         self.watermark_image = ImageTk.PhotoImage(watermark)
         self.watermark_label = tk.Label(self.root, image=self.watermark_image, bd=0)
-        self.watermark_label.place(relx=0.01, rely=0.97, anchor='sw')
-
-    def create_menu(self):
-        """Создание меню настроек"""
-        menubar = tk.Menu(self.root)
-
-        settings_menu = tk.Menu(menubar, tearoff=0)
-        settings_menu.add_command(label="Max connections (5)", command=lambda: self.set_max_workers(5))
-        settings_menu.add_command(label="Max connections (10)", command=lambda: self.set_max_workers(10))
-        settings_menu.add_command(label="Command timeout (15s)", command=lambda: self.set_timeout(15))
-        settings_menu.add_command(label="Command timeout (30s)", command=lambda: self.set_timeout(30))
-
-        menubar.add_cascade(label="Settings", menu=settings_menu)
-        self.root.config(menu=menubar)
+        self.watermark_label.place(relx=0.01, rely=0.98, anchor='sw')
 
     def create_widgets(self):
-        """Создание основного интерфейса"""
+        """Создание интерфейса"""
         main_frame = tk.Frame(self.root)
         main_frame.pack(fill=tk.BOTH, expand=True, padx=10, pady=10)
 
-        # Левая панель (управление)
-        left_panel = tk.Frame(main_frame, width=450)
+        # Левая панель
+        left_panel = tk.Frame(main_frame, width=400)
         left_panel.pack(side=tk.LEFT, fill=tk.Y)
         left_panel.pack_propagate(False)
 
-        # Блок информации
-        info_frame = tk.LabelFrame(left_panel, text="Excel File Format", padx=5, pady=5)
-        info_frame.pack(fill=tk.X, padx=5, pady=5)
+        # Описание формата
+        desc_frame = tk.LabelFrame(left_panel, text="Формат Excel-файла", padx=5, pady=5)
+        desc_frame.pack(fill=tk.X, padx=5, pady=5)
 
-        info_text = """1. Column 1: Device IP addresses
-2. Column 2: Login usernames
-3. Column 3: Passwords
+        desc_text = """Excel-файл должен содержать:
+1. Первый столбец - IP-адреса устройств
+2. Второй столбец - логины
+3. Третий столбец - пароли"""
 
-The program will try all credentials 
-for each device automatically."""
+        tk.Label(desc_frame, text=desc_text, justify=tk.LEFT).pack(padx=5, pady=5)
 
-        info_label = tk.Label(info_frame, text=info_text, justify=tk.LEFT, anchor='w')
-        info_label.pack(fill=tk.X, padx=5, pady=5)
-
-        # Блок загрузки файла
-        file_frame = tk.LabelFrame(left_panel, text="Load Excel File", padx=5, pady=5)
+        # Загрузка файла
+        file_frame = tk.LabelFrame(left_panel, text="Загрузить Excel-файл", padx=5, pady=5)
         file_frame.pack(fill=tk.X, padx=5, pady=5)
 
         self.file_path = tk.StringVar()
-        file_entry = tk.Entry(file_frame, textvariable=self.file_path, state='readonly')
-        file_entry.pack(side=tk.LEFT, fill=tk.X, expand=True, padx=5)
+        tk.Entry(file_frame, textvariable=self.file_path, state='readonly').pack(side=tk.LEFT, fill=tk.X, expand=True)
+        tk.Button(file_frame, text="Обзор", command=self.browse_file).pack(side=tk.RIGHT)
 
-        browse_btn = tk.Button(file_frame, text="Browse", command=self.browse_file)
-        browse_btn.pack(side=tk.RIGHT, padx=5)
-
-        # Блок команд
-        cmd_frame = tk.LabelFrame(left_panel, text="Commands to Execute", padx=5, pady=5)
+        # Ввод команд
+        cmd_frame = tk.LabelFrame(left_panel, text="Команды для выполнения", padx=5, pady=5)
         cmd_frame.pack(fill=tk.X, padx=5, pady=5)
 
         self.command_entries = []
         for i in range(5):
-            cmd_row = tk.Frame(cmd_frame)
-            cmd_row.pack(fill=tk.X, pady=2)
-            tk.Label(cmd_row, text=f"Command {i + 1}:", width=10).pack(side=tk.LEFT)
-            entry = tk.Entry(cmd_row)
+            row_frame = tk.Frame(cmd_frame)
+            row_frame.pack(fill=tk.X, pady=2)
+            tk.Label(row_frame, text=f"Команда {i + 1}:", width=10).pack(side=tk.LEFT)
+            entry = tk.Entry(row_frame)
             entry.pack(side=tk.LEFT, fill=tk.X, expand=True)
             self.command_entries.append(entry)
 
-        # Блок управления
-        ctrl_frame = tk.Frame(left_panel)
-        ctrl_frame.pack(fill=tk.X, padx=5, pady=10)
+        # Кнопки управления
+        btn_frame = tk.Frame(left_panel)
+        btn_frame.pack(fill=tk.X, padx=5, pady=10)
 
-        exec_btn = tk.Button(ctrl_frame, text="Execute", command=self.start_execution)
-        exec_btn.pack(side=tk.LEFT, fill=tk.X, expand=True, padx=2)
+        tk.Button(btn_frame, text="Выполнить", command=self.start_execution).pack(side=tk.LEFT, expand=True)
+        tk.Button(btn_frame, text="Сохранить", command=self.save_results).pack(side=tk.LEFT, expand=True)
+        tk.Button(btn_frame, text="Очистить", command=self.clear_all).pack(side=tk.LEFT, expand=True)
 
-        save_btn = tk.Button(ctrl_frame, text="Save Results", command=self.save_results)
-        save_btn.pack(side=tk.LEFT, fill=tk.X, expand=True, padx=2)
-
-        stop_btn = tk.Button(ctrl_frame, text="Stop", command=self.stop_execution)
-        stop_btn.pack(side=tk.LEFT, fill=tk.X, expand=True, padx=2)
-
-        # Правая панель (результаты)
+        # Правая панель
         right_panel = tk.Frame(main_frame)
         right_panel.pack(side=tk.RIGHT, fill=tk.BOTH, expand=True)
 
-        # Вкладки с результатами
+        # Вкладки
         self.notebook = ttk.Notebook(right_panel)
         self.notebook.pack(fill=tk.BOTH, expand=True)
 
         # Вкладка логов
-        self.log_tab = tk.Frame(self.notebook)
-        self.notebook.add(self.log_tab, text="Execution Log")
-
-        self.log_text = scrolledtext.ScrolledText(self.log_tab, wrap=tk.WORD)
-        self.log_text.pack(fill=tk.BOTH, expand=True)
+        self.create_log_tab()
 
         # Статус бар
         self.status_var = tk.StringVar()
-        self.status_var.set("Ready")
+        self.status_var.set("Готов к работе")
         status_bar = tk.Label(self.root, textvariable=self.status_var, bd=1, relief=tk.SUNKEN, anchor=tk.W)
         status_bar.pack(side=tk.BOTTOM, fill=tk.X)
 
-    def set_max_workers(self, num):
-        """Установка максимального количества подключений"""
-        self.max_workers = num
-        self.semaphore = Semaphore(num)
-        self.status_var.set(f"Max connections set: {num}")
+        # Счетчик устройств
+        self.tab_counter = tk.Label(self.root, text="Устройств: 0", bd=1, relief=tk.SUNKEN)
+        self.tab_counter.pack(side=tk.BOTTOM, fill=tk.X)
 
-    def set_timeout(self, timeout):
-        """Установка таймаута выполнения команд"""
-        self.command_timeout = timeout
-        self.status_var.set(f"Command timeout set: {timeout} sec")
+    def create_log_tab(self):
+        """Создает вкладку для логов"""
+        self.log_tab = tk.Frame(self.notebook)
+        self.notebook.add(self.log_tab, text="Логи")
+        self.log_text = scrolledtext.ScrolledText(self.log_tab, wrap=tk.WORD)
+        self.log_text.pack(fill=tk.BOTH, expand=True)
 
     def browse_file(self):
-        """Выбор файла с устройствами"""
+        """Загрузка Excel файла"""
         filetypes = (("Excel files", "*.xlsx *.xls"), ("All files", "*.*"))
-        filename = filedialog.askopenfilename(title="Select devices file", filetypes=filetypes)
-
+        filename = filedialog.askopenfilename(title="Open devices list", filetypes=filetypes)
         if filename:
+            self.file_path.set(filename)
             try:
-                self.file_path.set(filename)
                 df = pd.read_excel(filename)
-
                 if len(df.columns) < 3:
-                    raise ValueError("File must contain at least 3 columns")
+                    raise ValueError("Excel file must have at least 3 columns")
 
-                # Получаем уникальные IP и учетные данные
                 self.ip_list = df.iloc[:, 0].dropna().astype(str).unique().tolist()
                 creds = df.iloc[:, 1:3].dropna()
                 self.credentials = list(set(zip(
@@ -180,40 +148,32 @@ for each device automatically."""
                     creds.iloc[:, 1].astype(str)
                 )))
 
-                self.log_message(f"Loaded {len(self.ip_list)} devices and {len(self.credentials)} credentials")
-
+                self.log_message(f"Загружено {len(self.ip_list)} IP-адресов и {len(self.credentials)} учетных записей")
             except Exception as e:
-                self.log_message(f"File loading error: {str(e)}")
+                self.log_message(f"Ошибка загрузки файла: {str(e)}")
 
     def start_execution(self):
         """Запуск выполнения команд"""
-        self.commands = [cmd.get() for cmd in self.command_entries if cmd.get().strip()]
+        self.commands = [entry.get() for entry in self.command_entries if entry.get().strip()]
 
         if not self.ip_list:
-            messagebox.showerror("Error", "No devices loaded")
+            messagebox.showerror("Ошибка", "Не загружены IP-адреса")
             return
 
         if not self.credentials:
-            messagebox.showerror("Error", "No credentials loaded")
+            messagebox.showerror("Ошибка", "Не загружены учетные данные")
             return
 
         if not self.commands:
-            messagebox.showerror("Error", "No commands specified")
+            messagebox.showerror("Ошибка", "Введите хотя бы одну команду")
             return
 
-        # Подготовка к выполнению
         self.results = {}
         self.clear_tabs()
         self.stop_event.clear()
+        self.status_var.set(f"Выполнение на {len(self.ip_list)} устройствах (макс {self.max_workers} параллельно)...")
 
-        # Запуск в отдельном потоке
-        Thread(target=self.execute_parallel, daemon=True).start()
-        self.status_var.set(f"Executing on {len(self.ip_list)} devices (max {self.max_workers} parallel)...")
-
-    def stop_execution(self):
-        """Остановка выполнения"""
-        self.stop_event.set()
-        self.status_var.set("Execution stopped by user")
+        Thread(target=self.execute_parallel).start()
 
     def execute_parallel(self):
         """Параллельное выполнение на устройствах"""
@@ -225,13 +185,11 @@ for each device automatically."""
                 try:
                     future.result()
                 except Exception as e:
-                    self.log_message(f"Error processing {ip}: {str(e)}")
+                    self.log_message(f"Ошибка обработки {ip}: {str(e)}")
 
-        # Завершение работы
-        if not self.stop_event.is_set():
-            success = sum(1 for res in self.results.values() if res['success'])
-            self.status_var.set(f"Completed. Success: {success}/{len(self.ip_list)}")
-        self.log_message("\nExecution finished!")
+        self.log_message("\nВсе устройства обработаны!")
+        success_count = sum(1 for res in self.results.values() if res['success'])
+        self.status_var.set(f"Завершено. Успешно: {success_count}/{len(self.ip_list)}")
 
     def process_device(self, ip):
         """Обработка одного устройства"""
@@ -239,187 +197,118 @@ for each device automatically."""
             if self.stop_event.is_set():
                 return
 
-            self.log_message(f"\nProcessing device: {ip}")
-            self.create_device_tab(ip)
+            self.log_message(f"\nОбработка устройства: {ip}")
+            text_widget = self.create_device_tab(ip)
 
-            # Подключение к устройству
-            connected = False
-            ssh = None
-            used_credentials = None
-
-            for user, pwd in self.credentials:
-                try:
-                    self.log_message(f"Trying credentials: {user}/{pwd}")
-                    self.update_device_tab(ip, f"Trying credentials: {user}/{'*' * len(pwd)}\n")
-
-                    ssh = paramiko.SSHClient()
-                    ssh.set_missing_host_key_policy(paramiko.AutoAddPolicy())
-                    ssh.connect(ip, username=user, password=pwd, timeout=10)
-                    connected = True
-                    used_credentials = f"{user}/{pwd}"
-                    self.log_message(f"Connected to {ip} as {user}")
-                    self.update_device_tab(ip, f"Connected as: {user}\n\n")
-                    break
-
-                except Exception as e:
-                    error_msg = f"Connection failed {user}: {str(e)}"
-                    self.log_message(error_msg)
-                    self.update_device_tab(ip, f"{error_msg}\n")
-                    if ssh:
-                        ssh.close()
-                    continue
-
-            if not connected:
-                error_msg = f"Failed to connect to {ip}"
-                self.results[ip] = {'success': False, 'error': error_msg, 'commands': []}
-                self.update_device_tab(ip, f"\n{error_msg}\n")
+            ssh = self.connect_to_device(ip, text_widget)
+            if not ssh:
                 return
-
-            # Выполнение команд
-            all_commands_result = []
-            command_success = True
 
             try:
                 for cmd in self.commands:
                     if self.stop_event.is_set():
                         break
-
-                    # Выполнение одной команды
-                    try:
-                        self.log_message(f"Executing on {ip}: {cmd}")
-                        self.update_device_tab(ip, f"Executing:\n{cmd}\n\n")
-
-                        channel = ssh.get_transport().open_session()
-                        channel.exec_command(cmd)
-                        channel.setblocking(0)
-
-                        start_time = time.time()
-                        output = ""
-                        error_output = ""
-
-                        while not self.stop_event.is_set():
-                            # Чтение стандартного вывода
-                            while channel.recv_ready():
-                                data = channel.recv(1024).decode('utf-8', 'ignore')
-                                output += data
-                                self.update_device_tab(ip, data)
-
-                            # Чтение вывода ошибок
-                            while channel.recv_stderr_ready():
-                                data = channel.recv_stderr(1024).decode('utf-8', 'ignore')
-                                error_output += data
-                                self.update_device_tab(ip, data)
-
-                            # Проверка завершения
-                            if channel.exit_status_ready() or (time.time() - start_time) > self.command_timeout:
-                                break
-
-                            time.sleep(0.1)
-
-                        # Обработка результатов команды
-                        exit_status = channel.recv_exit_status() if channel.exit_status_ready() else -1
-
-                        if (time.time() - start_time) > self.command_timeout:
-                            result_msg = f"\nTimeout after {self.command_timeout} seconds\n"
-                            command_success = False
-                        elif exit_status != 0:
-                            result_msg = f"\nFailed (status: {exit_status})\n"
-                            command_success = False
-                        else:
-                            result_msg = f"\nCompleted successfully\n"
-
-                        # Формируем результат команды
-                        if error_output:
-                            command_result = f"Command: {cmd}\nERROR:\n{error_output}{result_msg}"
-                        else:
-                            command_result = f"Command: {cmd}\nOUTPUT:\n{output}{result_msg}"
-
-                        all_commands_result.append(command_result)
-                        self.update_device_tab(ip, result_msg)
-                        self.log_message(f"Command completed on {ip}: {cmd}")
-
-                        if not command_success:
-                            break
-
-                    except Exception as e:
-                        error_msg = f"Command failed on {ip}: {str(e)}"
-                        all_commands_result.append(f"Command: {cmd}\nERROR:\n{error_msg}")
-                        self.update_device_tab(ip, f"{error_msg}\n\n")
-                        self.log_message(error_msg)
-                        command_success = False
-                        break
-
-                    # Задержка между командами
-                    time.sleep(self.delay)
-
-                # Сохраняем результаты для устройства
-                self.results[ip] = {
-                    'credentials': used_credentials,
-                    'commands': all_commands_result,
-                    'success': command_success
-                }
-
+                    self.execute_single_command(ssh, ip, cmd, text_widget)
             finally:
-                if ssh:
+                ssh.close()
+                self.log_message(f"Отключено от {ip}")
+
+    def connect_to_device(self, ip, text_widget):
+        """Подключение к устройству"""
+        for user, pwd in self.credentials:
+            try:
+                self.log_message(f"Попытка подключения: {user}/{pwd}")
+                self.update_device_tab(text_widget, f"Попытка подключения: {user}/{'*' * len(pwd)}\n")
+
+                ssh = paramiko.SSHClient()
+                ssh.set_missing_host_key_policy(paramiko.AutoAddPolicy())
+                ssh.connect(ip, username=user, password=pwd, timeout=10)
+
+                self.log_message(f"Успешное подключение к {ip} с {user}")
+                self.update_device_tab(text_widget, f"Подключено с: {user}\n\n")
+                return ssh
+
+            except Exception as e:
+                error_msg = f"Ошибка подключения с {user}: {str(e)}"
+                self.log_message(error_msg)
+                self.update_device_tab(text_widget, f"{error_msg}\n")
+                if 'ssh' in locals():
                     ssh.close()
-                    self.log_message(f"Disconnected from {ip}")
 
-    def update_device_tab(self, ip, text):
-        """Обновление вкладки устройства"""
-        if ip not in self.active_tabs:
-            self.create_device_tab(ip)
+        error_msg = f"Не удалось подключиться к {ip}"
+        self.results[ip] = {'success': False, 'error': error_msg}
+        self.update_device_tab(text_widget, f"\n{error_msg}\n")
+        self.log_message(error_msg)
+        return None
 
-        def _update():
-            text_widget = self.active_tabs[ip]['text']
-            text_widget.configure(state='normal')
-            text_widget.insert(tk.END, text)
-            text_widget.configure(state='disabled')
-            text_widget.see(tk.END)
+    def execute_single_command(self, ssh, ip, cmd, text_widget):
+        """Выполнение одной команды"""
+        self.log_message(f"Выполнение команды: {cmd}")
+        self.update_device_tab(text_widget, f"Команда:\n{cmd}\n\n")
 
-        self.root.after(0, _update)
+        channel = ssh.get_transport().open_session()
+        channel.exec_command(cmd)
+        channel.setblocking(0)
+
+        start_time = time.time()
+        output = ""
+
+        while not self.stop_event.is_set():
+            while channel.recv_ready():
+                output += channel.recv(1024).decode('utf-8')
+                self.update_device_tab(text_widget, output)
+
+            while channel.recv_stderr_ready():
+                output += channel.recv_stderr(1024).decode('utf-8')
+                self.update_device_tab(text_widget, output)
+
+            if channel.exit_status_ready() or (time.time() - start_time) > self.command_timeout:
+                break
+
+            time.sleep(0.1)
+
+        if not channel.exit_status_ready():
+            channel.close()
+            self.update_device_tab(text_widget, f"\nПревышено время ожидания ({self.command_timeout} сек)\n")
+        else:
+            exit_status = channel.recv_exit_status()
+            self.update_device_tab(text_widget, f"\nКоманда завершена с кодом: {exit_status}\n")
+
+        if not self.stop_event.is_set():
+            time.sleep(self.delay)
 
     def create_device_tab(self, ip):
-        """Создание новой вкладки для устройства"""
+        """Создание вкладки для устройства"""
         if ip in self.active_tabs:
-            return
+            return self.active_tabs[ip]['text']
 
-        def _create():
-            tab = tk.Frame(self.notebook)
-            text = scrolledtext.ScrolledText(tab, wrap=tk.WORD)
-            text.pack(fill=tk.BOTH, expand=True)
+        tab = tk.Frame(self.notebook)
+        text = scrolledtext.ScrolledText(tab, wrap=tk.WORD)
+        text.pack(fill=tk.BOTH, expand=True)
 
-            text.insert(tk.END, f"Results for {ip}\n{'=' * 30}\n")
-            text.configure(state='disabled')
+        self.notebook.add(tab, text=ip)
+        self.notebook.select(tab)
 
-            self.notebook.add(tab, text=ip)
-            self.notebook.select(tab)
+        self.active_tabs[ip] = {'tab': tab, 'text': text}
+        self.update_tab_counter()
+        return text
 
-            self.active_tabs[ip] = {
-                'tab': tab,
-                'text': text
-            }
+    def update_tab_counter(self):
+        """Обновление счетчика вкладок"""
+        count = len(self.notebook.tabs()) - 1
+        self.tab_counter.config(text=f"Устройств: {count}")
 
-        self.root.after(0, _create)
-
-    def log_message(self, message):
-        """Добавление сообщения в лог"""
-        self.output_queue.put(f"[{datetime.now().strftime('%H:%M:%S')}] {message}")
-
-    def check_queue(self):
-        """Проверка очереди сообщений"""
-        while not self.output_queue.empty():
-            msg = self.output_queue.get()
-            self.log_text.configure(state='normal')
-            self.log_text.insert(tk.END, msg + "\n")
-            self.log_text.configure(state='disabled')
-            self.log_text.see(tk.END)
-
-        self.root.after(100, self.check_queue)
+    def update_device_tab(self, text_widget, text):
+        """Обновление содержимого вкладки"""
+        text_widget.configure(state='normal')
+        text_widget.insert(tk.END, text)
+        text_widget.configure(state='disabled')
+        text_widget.see(tk.END)
 
     def save_results(self):
-        """Сохранение результатов в файл"""
+        """Сохранение результатов"""
         if not self.results:
-            messagebox.showerror("Error", "No results to save")
+            messagebox.showerror("Ошибка", "Нет результатов для сохранения")
             return
 
         try:
@@ -434,47 +323,77 @@ for each device automatically."""
 
             if save_path:
                 with open(save_path, 'w', encoding='utf-8') as f:
-                    f.write(f"SSH Command Execution Results - {timestamp}\n\n")
-                    f.write(f"Executed commands: {len(self.commands)}\n")
+                    f.write(f"Результаты выполнения команд - {timestamp}\n\n")
+                    f.write(f"Выполненные команды:\n")
                     for i, cmd in enumerate(self.commands, 1):
                         f.write(f"{i}. {cmd}\n")
+                    f.write("\nДоступные учетные данные:\n")
+                    for user, pwd in self.credentials:
+                        f.write(f"{user}/{pwd}\n")
                     f.write("\n")
 
-                    for ip, res in self.results.items():
-                        f.write(f"{'=' * 50}\nDevice: {ip}\n")
-                        f.write(f"Credentials: {res.get('credentials', 'unknown')}\n")
-                        f.write(f"Status: {'SUCCESS' if res.get('success') else 'FAILED'}\n\n")
+                    for ip, result in self.results.items():
+                        f.write(f"=== {ip} ===\n")
+                        f.write(f"Статус: {'УСПЕХ' if result['success'] else 'ОШИБКА'}\n")
+                        if not result['success']:
+                            f.write(f"Ошибка: {result.get('error', 'Неизвестная ошибка')}\n")
+                        f.write(f"{result.get('output', '')}\n\n")
 
-                        for cmd_result in res.get('commands', []):
-                            f.write(f"{cmd_result}\n\n")
-
-                self.log_message(f"Results saved to: {save_path}")
-                self.status_var.set(f"Results saved")
+                self.log_message(f"Результаты сохранены в {save_path}")
+                self.status_var.set(f"Сохранено: {os.path.basename(save_path)}")
 
         except Exception as e:
-            self.log_message(f"Save error: {str(e)}")
+            self.log_message(f"Ошибка сохранения: {str(e)}")
+            self.status_var.set("Ошибка сохранения")
 
     def clear_tabs(self):
-        """Очистка всех вкладок"""
-        for ip in list(self.active_tabs.keys()):
-            self.notebook.forget(self.active_tabs[ip]['tab'])
+        """Очистка вкладок"""
+        for ip, data in list(self.active_tabs.items()):
+            self.notebook.forget(data['tab'])
             del self.active_tabs[ip]
 
         self.log_text.configure(state='normal')
         self.log_text.delete(1.0, tk.END)
         self.log_text.configure(state='disabled')
+        self.update_tab_counter()
 
     def clear_all(self):
         """Полная очистка"""
         self.clear_tabs()
         self.results = {}
         self.file_path.set("")
-        self.status_var.set("Ready")
+        self.status_var.set("Готов к работе")
         for entry in self.command_entries:
             entry.delete(0, tk.END)
+
+    def log_message(self, message):
+        """Логирование сообщений"""
+        self.output_queue.put(message)
+
+    def check_queue(self):
+        """Проверка очереди сообщений"""
+        while not self.output_queue.empty():
+            msg = self.output_queue.get()
+            self.log_text.configure(state='normal')
+            self.log_text.insert(tk.END, msg + "\n")
+            self.log_text.configure(state='disabled')
+            self.log_text.see(tk.END)
+
+        self.root.after(100, self.check_queue)
 
 
 if __name__ == "__main__":
     root = tk.Tk()
     app = SSHClientApp(root)
+
+    # Меню для настройки параллельных подключений
+    menu = tk.Menu(root)
+    root.config(menu=menu)
+
+    settings_menu = tk.Menu(menu, tearoff=0)
+    menu.add_cascade(label="Настройки", menu=settings_menu)
+    settings_menu.add_command(label="Макс. подключений: 5", command=lambda: setattr(app, 'max_workers', 5))
+    settings_menu.add_command(label="Макс. подключений: 10", command=lambda: setattr(app, 'max_workers', 10))
+    settings_menu.add_command(label="Макс. подключений: 15", command=lambda: setattr(app, 'max_workers', 15))
+
     root.mainloop()
