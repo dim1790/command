@@ -5,6 +5,10 @@
   
   [![Python](https://img.shields.io/badge/Python-3.7%2B-blue?logo=python)](https://python.org)
   [![License](https://img.shields.io/badge/License-MIT-green)](LICENSE)
+
+
+
+  Создано с ❤️ для эффективного управления сетями
 </div>
 
 ## ✨ Возможности
@@ -74,6 +78,9 @@ MIT License - свободное использование и модифика�
 Разработчик: FGMP1790
 📧 Email: your.email@example.com
 💬 Telegram: @yournickname
+
+
+
 
 <div align="center"> <sub>Создано с ❤️ для эффективного управления сетями</sub> </div>
 <div align="center">
