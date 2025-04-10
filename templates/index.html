@@ -1,0 +1,677 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>Parallel SSH Commander</title>
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.1.3/dist/css/bootstrap.min.css" rel="stylesheet">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css">
+    <style>
+        body {
+            padding-top: 56px;
+            padding-bottom: 60px;
+            font-size: 14px;
+        }
+        .navbar {
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+        }
+        .tab-content {
+            padding: 10px;
+        }
+        .log-output {
+            height: 200px;
+            overflow-y: auto;
+            background-color: #f8f9fa;
+            border: 1px solid #dee2e6;
+            border-radius: 4px;
+            padding: 10px;
+            font-family: monospace;
+            font-size: 13px;
+        }
+        .device-output {
+            height: 300px;
+            overflow-y: auto;
+            background-color: #f8f9fa;
+            border: 1px solid #dee2e6;
+            border-radius: 4px;
+            padding: 10px;
+            font-family: monospace;
+            font-size: 13px;
+        }
+        .command-input {
+            margin-bottom: 5px;
+        }
+        .status-bar {
+            position: fixed;
+            bottom: 0;
+            left: 0;
+            right: 0;
+            background-color: #f8f9fa;
+            border-top: 1px solid #dee2e6;
+            padding: 10px;
+            z-index: 1000;
+        }
+        .nav-tabs {
+            overflow-x: auto;
+            overflow-y: hidden;
+            flex-wrap: nowrap;
+            white-space: nowrap;
+        }
+        .nav-tabs .nav-link {
+            white-space: nowrap;
+        }
+        .scrollable-tabs {
+            overflow-x: auto;
+        }
+        .form-range {
+            width: 100%;
+        }
+        .range-value {
+            display: inline-block;
+            width: 30px;
+            text-align: center;
+        }
+    </style>
+</head>
+<body>
+    <!-- Навигационное меню -->
+    <nav class="navbar navbar-expand-lg navbar-light bg-light fixed-top">
+        <div class="container-fluid">
+            <a class="navbar-brand" href="#">SSH Commander</a>
+            <button class="navbar-toggler" type="button" data-bs-toggle="collapse" data-bs-target="#navbarNav">
+                <span class="navbar-toggler-icon"></span>
+            </button>
+            <div class="collapse navbar-collapse" id="navbarNav">
+                <ul class="navbar-nav">
+                    <li class="nav-item">
+                        <a class="nav-link" href="#" data-bs-toggle="modal" data-bs-target="#settingsModal">
+                            <i class="fas fa-cog"></i> Настройки
+                        </a>
+                    </li>
+                    <li class="nav-item">
+                        <a class="nav-link" href="#" id="downloadBtn">
+                            <i class="fas fa-download"></i> Скачать
+                        </a>
+                    </li>
+                    <li class="nav-item">
+                        <a class="nav-link" href="#" id="clearBtn">
+                            <i class="fas fa-trash"></i> Очистить
+                        </a>
+                    </li>
+                </ul>
+            </div>
+        </div>
+    </nav>
+
+    <!-- Основное содержимое -->
+    <div class="container mt-3">
+        <!-- Вкладки -->
+        <ul class="nav nav-tabs" id="myTab" role="tablist">
+            <li class="nav-item" role="presentation">
+                <button class="nav-link active" id="home-tab" data-bs-toggle="tab" data-bs-target="#home" type="button">
+                    <i class="fas fa-home"></i> Главная
+                </button>
+            </li>
+            <li class="nav-item" role="presentation">
+                <button class="nav-link" id="logs-tab" data-bs-toggle="tab" data-bs-target="#logs" type="button">
+                    <i class="fas fa-terminal"></i> Логи
+                </button>
+            </li>
+        </ul>
+
+        <div class="tab-content" id="myTabContent">
+            <!-- Главная вкладка -->
+            <div class="tab-pane fade show active" id="home" role="tabpanel">
+                <!-- Загрузка файла -->
+                <div class="card mt-3">
+                    <div class="card-header">
+                        <i class="fas fa-file-excel"></i> Загрузить Excel-файл
+                    </div>
+                    <div class="card-body">
+                        <div class="mb-3">
+                            <label class="form-label">Формат файла:</label>
+                            <div class="alert alert-info p-2">
+                                <small>
+                                    Excel-файл должен содержать:<br>
+                                    1. Первый столбец - IP-адреса устройств<br>
+                                    2. Второй столбец - логины<br>
+                                    3. Третий столбец - пароли
+                                </small>
+                            </div>
+                        </div>
+                        <div class="mb-3">
+                            <input class="form-control" type="file" id="excelFile" accept=".xlsx,.xls">
+                        </div>
+                        <button class="btn btn-primary w-100" id="uploadBtn">
+                            <i class="fas fa-upload"></i> Загрузить
+                        </button>
+                        <div class="mt-2 text-center" id="fileInfo">
+                            <small class="text-muted">Файл не загружен</small>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Команды -->
+                <div class="card mt-3">
+                    <div class="card-header">
+                        <i class="fas fa-terminal"></i> Команды для выполнения
+                    </div>
+                    <div class="card-body">
+                        <div id="commandInputs">
+                            <div class="input-group mb-2">
+                                <span class="input-group-text">1</span>
+                                <input type="text" class="form-control command-input" placeholder="Введите команду">
+                            </div>
+                        </div>
+                        <div class="d-flex justify-content-between mt-2">
+                            <button class="btn btn-sm btn-outline-secondary" id="addCommandBtn">
+                                <i class="fas fa-plus"></i> Добавить
+                            </button>
+                            <button class="btn btn-sm btn-outline-primary" id="saveCommandsBtn">
+                                <i class="fas fa-save"></i> Сохранить
+                            </button>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Управление -->
+                <div class="card mt-3">
+                    <div class="card-header">
+                        <i class="fas fa-play-circle"></i> Управление выполнением
+                    </div>
+                    <div class="card-body">
+                        <div class="d-grid gap-2">
+                            <button class="btn btn-success" id="startBtn">
+                                <i class="fas fa-play"></i> Начать выполнение
+                            </button>
+                            <button class="btn btn-danger" id="stopBtn" disabled>
+                                <i class="fas fa-stop"></i> Остановить
+                            </button>
+                        </div>
+                        <div class="progress mt-3" style="height: 20px;" id="progressContainer" hidden>
+                            <div class="progress-bar progress-bar-striped progress-bar-animated"
+                                 role="progressbar" id="progressBar" style="width: 0%"></div>
+                        </div>
+                        <div class="mt-2 text-center" id="progressText"></div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Вкладка логов -->
+            <div class="tab-pane fade" id="logs" role="tabpanel">
+                <div class="log-output" id="logOutput"></div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Статус бар -->
+    <div class="status-bar d-flex justify-content-between align-items-center">
+        <small id="statusText">Готов к работе</small>
+        <small id="devicesCount">Устройств: 0</small>
+    </div>
+
+    <!-- Модальное окно настроек -->
+    <div class="modal fade" id="settingsModal" tabindex="-1" aria-hidden="true">
+        <div class="modal-dialog">
+            <div class="modal-content">
+                <div class="modal-header">
+                    <h5 class="modal-title"><i class="fas fa-cog"></i> Настройки</h5>
+                    <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+                </div>
+                <div class="modal-body">
+                    <form id="settingsForm">
+                        <div class="mb-3">
+                            <label class="form-label">Максимальное количество потоков: <span id="maxWorkersValue" class="range-value">5</span></label>
+                            <input type="range" class="form-range" min="1" max="10" step="1" id="maxWorkers" value="5">
+                        </div>
+                        <div class="mb-3">
+                            <label class="form-label">Таймаут выполнения команд (сек): <span id="timeoutValue" class="range-value">10</span></label>
+                            <input type="range" class="form-range" min="1" max="30" step="1" id="commandTimeout" value="10">
+                        </div>
+                        <div class="mb-3">
+                            <label class="form-label">Задержка между командами (сек): <span id="delayValue" class="range-value">2</span></label>
+                            <input type="range" class="form-range" min="0" max="10" step="1" id="delayBetweenCommands" value="2">
+                        </div>
+                        <div class="form-check form-switch mb-3">
+                            <input class="form-check-input" type="checkbox" id="autoScroll" checked>
+                            <label class="form-check-label" for="autoScroll">Автопрокрутка логов</label>
+                        </div>
+                    </form>
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Закрыть</button>
+                    <button type="button" class="btn btn-primary" id="saveSettingsBtn">Сохранить</button>
+                    <button type="button" class="btn btn-outline-secondary" id="resetSettingsBtn">По умолчанию</button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Подключаем необходимые JS библиотеки -->
+    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.1.3/dist/js/bootstrap.bundle.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/socket.io/4.0.1/socket.io.min.js"></script>
+    <script>
+        // Инициализация Socket.IO
+        const socket = io();
+
+        // Глобальные переменные
+        let devices = [];
+        let commands = [];
+        let activeTabs = {};
+        let currentTabId = 'logs';
+        let executionInProgress = false;
+
+        // Инициализация при загрузке страницы
+        document.addEventListener('DOMContentLoaded', function() {
+            // Загрузка настроек
+            loadSettings();
+
+            // Обработчики событий для элементов управления
+            setupEventHandlers();
+
+            // Настройка Socket.IO обработчиков
+            setupSocketHandlers();
+        });
+
+        function loadSettings() {
+            // Здесь можно загрузить сохраненные настройки из localStorage
+            // Пока просто устанавливаем значения по умолчанию
+            document.getElementById('maxWorkers').value = 5;
+            document.getElementById('maxWorkersValue').textContent = 5;
+            document.getElementById('commandTimeout').value = 10;
+            document.getElementById('timeoutValue').textContent = 10;
+            document.getElementById('delayBetweenCommands').value = 2;
+            document.getElementById('delayValue').textContent = 2;
+            document.getElementById('autoScroll').checked = true;
+        }
+
+        function setupEventHandlers() {
+            // Кнопка загрузки файла
+            document.getElementById('uploadBtn').addEventListener('click', uploadFile);
+
+            // Кнопка добавления команды
+            document.getElementById('addCommandBtn').addEventListener('click', addCommandInput);
+
+            // Кнопка сохранения команд
+            document.getElementById('saveCommandsBtn').addEventListener('click', saveCommands);
+
+            // Кнопки управления выполнением
+            document.getElementById('startBtn').addEventListener('click', startExecution);
+            document.getElementById('stopBtn').addEventListener('click', stopExecution);
+
+            // Кнопки в модальном окне настроек
+            document.getElementById('saveSettingsBtn').addEventListener('click', saveSettings);
+            document.getElementById('resetSettingsBtn').addEventListener('click', resetSettings);
+
+            // Кнопки скачивания и очистки
+            document.getElementById('downloadBtn').addEventListener('click', downloadResults);
+            document.getElementById('clearBtn').addEventListener('click', clearAll);
+
+            // Обработчики для ползунков настроек
+            document.getElementById('maxWorkers').addEventListener('input', function() {
+                document.getElementById('maxWorkersValue').textContent = this.value;
+            });
+
+            document.getElementById('commandTimeout').addEventListener('input', function() {
+                document.getElementById('timeoutValue').textContent = this.value;
+            });
+
+            document.getElementById('delayBetweenCommands').addEventListener('input', function() {
+                document.getElementById('delayValue').textContent = this.value;
+            });
+
+            // Добавляем 3 поля команд по умолчанию
+            for (let i = 0; i < 2; i++) {
+                addCommandInput();
+            }
+        }
+
+        function setupSocketHandlers() {
+            // Обработка системных логов
+            socket.on('log', function(data) {
+                const logOutput = document.getElementById('logOutput');
+                logOutput.innerHTML += data.message + '\n';
+
+                if (document.getElementById('autoScroll').checked) {
+                    logOutput.scrollTop = logOutput.scrollHeight;
+                }
+            });
+
+            // Обновление статуса выполнения
+            socket.on('status_update', function(data) {
+                const statusText = document.getElementById('statusText');
+                const progressContainer = document.getElementById('progressContainer');
+                const progressBar = document.getElementById('progressBar');
+                const progressText = document.getElementById('progressText');
+                const startBtn = document.getElementById('startBtn');
+                const stopBtn = document.getElementById('stopBtn');
+
+                if (data.status === 'running') {
+                    statusText.textContent = `Выполнение на ${data.devices_total} устройствах...`;
+                    progressContainer.hidden = false;
+                    progressBar.style.width = '0%';
+                    progressText.textContent = '0% (0/' + data.devices_total + ')';
+                    startBtn.disabled = true;
+                    stopBtn.disabled = false;
+                    executionInProgress = true;
+                }
+                else if (data.status === 'completed') {
+                    statusText.textContent = `Завершено. Успешно: ${data.success_count}/${data.devices_total}`;
+                    progressBar.style.width = '100%';
+                    progressText.textContent = '100% (' + data.devices_total + '/' + data.devices_total + ')';
+                    startBtn.disabled = false;
+                    stopBtn.disabled = true;
+                    executionInProgress = false;
+
+                    // Через 3 секунды скрываем прогресс-бар
+                    setTimeout(() => {
+                        progressContainer.hidden = true;
+                    }, 3000);
+                }
+                else if (data.status === 'stopped') {
+                    statusText.textContent = 'Выполнение остановлено';
+                    progressBar.classList.remove('progress-bar-animated');
+                    progressBar.classList.add('bg-warning');
+                    startBtn.disabled = false;
+                    stopBtn.disabled = true;
+                    executionInProgress = false;
+                }
+            });
+
+            // Начало обработки устройства
+            socket.on('device_start', function(data) {
+                createDeviceTab(data.ip);
+            });
+
+            // Завершение обработки устройства
+            socket.on('device_end', function(data) {
+                const tabId = 'device-' + data.ip.replace(/\./g, '-');
+                const tabLink = document.querySelector(`[data-bs-target="#${tabId}"]`);
+
+                if (tabLink) {
+                    if (data.success) {
+                        tabLink.innerHTML = `<i class="fas fa-check-circle text-success"></i> ${data.ip}`;
+                    } else {
+                        tabLink.innerHTML = `<i class="fas fa-times-circle text-danger"></i> ${data.ip}`;
+                    }
+                }
+            });
+
+            // Вывод с устройства
+            socket.on('device_output', function(data) {
+                const tabId = 'device-' + data.ip.replace(/\./g, '-');
+                const outputElement = document.querySelector(`#${tabId} .device-output`);
+
+                if (outputElement) {
+                    outputElement.innerHTML += data.output;
+
+                    if (document.getElementById('autoScroll').checked) {
+                        outputElement.scrollTop = outputElement.scrollHeight;
+                    }
+                }
+            });
+
+            // Обновление прогресса выполнения
+            socket.on('progress_update', function(data) {
+                const progressBar = document.getElementById('progressBar');
+                const progressText = document.getElementById('progressText');
+
+                const percent = Math.round((data.completed / data.total) * 100);
+                progressBar.style.width = percent + '%';
+                progressText.textContent = percent + '% (' + data.completed + '/' + data.total + ')';
+            });
+
+            // Начало выполнения
+            socket.on('execution_started', function() {
+                document.getElementById('progressContainer').hidden = false;
+            });
+        }
+
+        function uploadFile() {
+            const fileInput = document.getElementById('excelFile');
+            const fileInfo = document.getElementById('fileInfo');
+
+            if (fileInput.files.length === 0) {
+                alert('Пожалуйста, выберите файл');
+                return;
+            }
+
+            const formData = new FormData();
+            formData.append('file', fileInput.files[0]);
+
+            fetch('/upload', {
+                method: 'POST',
+                body: formData
+            })
+            .then(response => response.json())
+            .then(data => {
+                if (data.error) {
+                    alert('Ошибка: ' + data.error);
+                } else {
+                    fileInfo.innerHTML = `<small class="text-success">Загружено устройств: ${data.devices_count}, учетных записей: ${data.credentials_count}</small>`;
+                    document.getElementById('devicesCount').textContent = `Устройств: ${data.devices_count}`;
+                }
+            })
+            .catch(error => {
+                console.error('Error:', error);
+                alert('Произошла ошибка при загрузке файла');
+            });
+        }
+
+        function addCommandInput() {
+            const container = document.getElementById('commandInputs');
+            const count = container.querySelectorAll('.command-input').length + 1;
+
+            const div = document.createElement('div');
+            div.className = 'input-group mb-2';
+
+            const span = document.createElement('span');
+            span.className = 'input-group-text';
+            span.textContent = count;
+
+            const input = document.createElement('input');
+            input.type = 'text';
+            input.className = 'form-control command-input';
+            input.placeholder = 'Введите команду';
+
+            const button = document.createElement('button');
+            button.className = 'btn btn-outline-danger';
+            button.type = 'button';
+            button.innerHTML = '<i class="fas fa-times"></i>';
+            button.addEventListener('click', function() {
+                div.remove();
+                renumberCommands();
+            });
+
+            div.appendChild(span);
+            div.appendChild(input);
+            div.appendChild(button);
+            container.appendChild(div);
+        }
+
+        function renumberCommands() {
+            const inputs = document.querySelectorAll('#commandInputs .input-group-text');
+            inputs.forEach((span, index) => {
+                span.textContent = index + 1;
+            });
+        }
+
+        function saveCommands() {
+            const inputs = document.querySelectorAll('#commandInputs .command-input');
+            commands = Array.from(inputs).map(input => input.value.trim()).filter(cmd => cmd !== '');
+
+            if (commands.length === 0) {
+                alert('Пожалуйста, введите хотя бы одну команду');
+                return;
+            }
+
+            fetch('/set_commands', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                },
+                body: JSON.stringify({ commands: commands })
+            })
+            .then(response => response.json())
+            .then(data => {
+                if (data.error) {
+                    alert('Ошибка: ' + data.error);
+                } else {
+                    alert(`Сохранено ${data.commands_count} команд`);
+                }
+            })
+            .catch(error => {
+                console.error('Error:', error);
+                alert('Произошла ошибка при сохранении команд');
+            });
+        }
+
+        function startExecution() {
+            if (executionInProgress) {
+                alert('Выполнение уже запущено');
+                return;
+            }
+
+            socket.emit('start_execution');
+        }
+
+        function stopExecution() {
+            if (!executionInProgress) {
+                alert('Нет активного выполнения');
+                return;
+            }
+
+            socket.emit('stop_execution');
+        }
+
+        function saveSettings() {
+            const settings = {
+                max_workers: parseInt(document.getElementById('maxWorkers').value),
+                command_timeout: parseInt(document.getElementById('commandTimeout').value),
+                delay_between_commands: parseInt(document.getElementById('delayBetweenCommands').value),
+                auto_scroll: document.getElementById('autoScroll').checked
+            };
+
+            fetch('/set_settings', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                },
+                body: JSON.stringify(settings)
+            })
+            .then(response => response.json())
+            .then(data => {
+                if (data.error) {
+                    alert('Ошибка: ' + data.error);
+                } else {
+                    // Закрываем модальное окно
+                    bootstrap.Modal.getInstance(document.getElementById('settingsModal')).hide();
+                    alert('Настройки успешно сохранены');
+                }
+            })
+            .catch(error => {
+                console.error('Error:', error);
+                alert('Произошла ошибка при сохранении настроек');
+            });
+        }
+
+        function resetSettings() {
+            document.getElementById('maxWorkers').value = 5;
+            document.getElementById('maxWorkersValue').textContent = 5;
+            document.getElementById('commandTimeout').value = 10;
+            document.getElementById('timeoutValue').textContent = 10;
+            document.getElementById('delayBetweenCommands').value = 2;
+            document.getElementById('delayValue').textContent = 2;
+            document.getElementById('autoScroll').checked = true;
+        }
+
+        function downloadResults() {
+            window.location.href = '/download_results';
+        }
+
+        function clearAll() {
+            if (confirm('Вы уверены, что хотите очистить все данные?')) {
+                fetch('/clear_all', {
+                    method: 'GET'
+                })
+                .then(response => response.json())
+                .then(data => {
+                    if (data.success) {
+                        // Очищаем UI
+                        document.getElementById('fileInfo').innerHTML = '<small class="text-muted">Файл не загружен</small>';
+                        document.getElementById('devicesCount').textContent = 'Устройств: 0';
+                        document.getElementById('logOutput').textContent = '';
+
+                        // Очищаем вкладки устройств
+                        const tabsContainer = document.querySelector('.nav-tabs');
+                        const tabContentContainer = document.querySelector('.tab-content');
+
+                        // Оставляем только главную вкладку и вкладку логов
+                        const tabsToRemove = Array.from(tabsContainer.querySelectorAll('.nav-item')).slice(2);
+                        const tabContentsToRemove = Array.from(tabContentContainer.querySelectorAll('.tab-pane')).slice(2);
+
+                        tabsToRemove.forEach(tab => tab.remove());
+                        tabContentsToRemove.forEach(content => content.remove());
+
+                        // Активируем вкладку логов
+                        document.querySelector('#logs-tab').click();
+                    }
+                })
+                .catch(error => {
+                    console.error('Error:', error);
+                    alert('Произошла ошибка при очистке данных');
+                });
+            }
+        }
+
+        function createDeviceTab(ip) {
+            const tabId = 'device-' + ip.replace(/\./g, '-');
+
+            // Проверяем, существует ли уже вкладка для этого устройства
+            if (document.getElementById(tabId)) {
+                return;
+            }
+
+            // Создаем новую вкладку
+            const tabsContainer = document.querySelector('.nav-tabs');
+            const tabContentContainer = document.querySelector('.tab-content');
+
+            // Создаем элемент вкладки
+            const tabItem = document.createElement('li');
+            tabItem.className = 'nav-item';
+            tabItem.role = 'presentation';
+
+            const tabButton = document.createElement('button');
+            tabButton.className = 'nav-link';
+            tabButton.id = tabId + '-tab';
+            tabButton.setAttribute('data-bs-toggle', 'tab');
+            tabButton.setAttribute('data-bs-target', '#' + tabId);
+            tabButton.type = 'button';
+            tabButton.role = 'tab';
+            tabButton.innerHTML = `<i class="fas fa-circle-notch fa-spin"></i> ${ip}`;
+
+            tabItem.appendChild(tabButton);
+
+            // Вставляем перед кнопкой логов
+            const logsTab = document.querySelector('#logs-tab').parentElement;
+            tabsContainer.insertBefore(tabItem, logsTab);
+
+            // Создаем содержимое вкладки
+            const tabPane = document.createElement('div');
+            tabPane.className = 'tab-pane fade';
+            tabPane.id = tabId;
+            tabPane.role = 'tabpanel';
+
+            const outputDiv = document.createElement('div');
+            outputDiv.className = 'device-output';
+
+            tabPane.appendChild(outputDiv);
+            tabContentContainer.appendChild(tabPane);
+
+            // Активируем новую вкладку
+            const tabInstance = new bootstrap.Tab(tabButton);
+            tabInstance.show();
+        }
+    </script>
+</body>
+</html>
